@@ -1,44 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCicPath } from '@/lib/cic-config';
+import { getCicHttpBaseUrl, getCicAuthHeaders } from '@/lib/cic-config';
 
 export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const instanceName = searchParams.get('instanceName');
-    const tail = searchParams.get('tail');
+  const { searchParams } = new URL(request.url);
+  const instanceName = searchParams.get('instanceName');
+  const tail = searchParams.get('tail');
 
-    if (!instanceName) {
-      return NextResponse.json(
-        { error: 'Missing instanceName parameter' },
-        { status: 400 }
-      );
-    }
-
-    const { exec } = require('child_process');
-    const { promisify } = require('util');
-    const execAsync = promisify(exec);
-
-    // Build command
-    const cicPath = await getCicPath();
-    let cicCommand = `${cicPath} server logs --name ${instanceName}`;
-    if (tail) {
-      cicCommand += ` --tail ${tail}`;
-    }
-
-    const { stdout, stderr } = await execAsync(cicCommand);
-
-    return NextResponse.json({
-      logs: stdout || stderr,
-    });
-  } catch (error: any) {
-    console.error('Error getting logs:', error);
+  if (!instanceName) {
     return NextResponse.json(
-      { 
-        error: 'Failed to get logs',
-        details: error.message,
-        logs: error.stdout || error.stderr || ''
-      },
-      { status: 500 }
+      { error: 'Missing instanceName parameter' },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const url = new URL(
+      `${getCicHttpBaseUrl()}/api/servers/${encodeURIComponent(instanceName)}/logs`
+    );
+    if (tail) url.searchParams.set('tail', tail);
+
+    const res = await fetch(url.toString(), {
+      headers: { ...getCicAuthHeaders() },
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Unknown error from cic HTTP server' }));
+      return NextResponse.json(err, { status: res.status });
+    }
+
+    const data = await res.json();
+    return NextResponse.json(data);
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: `Cannot connect to cic HTTP server: ${error.message}` },
+      { status: 503 }
     );
   }
 }
